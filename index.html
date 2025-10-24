@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>AI Vision + Hand Tracking Arduino Web App</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+:root{
+  --bg:#0f1115;
+  --card:#14161a;
+  --accent:#00c3ff;
+  --good:#00ff99;
+  --warn:#ffcc66;
+  --error:#ff6b6b;
+  --muted:#9fdfff;
+  --panel-radius:14px;
+  --gap:16px;
+  --pad:16px;
+  --left-width:320px;
+  --max-width:1400px;
+}
+html,body{height:100%;margin:0;background:var(--bg);color:#fff;font-family:Inter,Segoe UI,Arial,sans-serif;display:flex;align-items:flex-start;justify-content:center;padding:28px;}
+.wrapper { width:100%; max-width:var(--max-width); display:grid; grid-template-columns: var(--left-width) 1fr; gap:24px; align-items:start; }
+
+/* LEFT NAV */
+.nav {
+  background:linear-gradient(180deg,#0b0c0e,#0f1115);
+  border-radius:18px;
+  padding:16px;
+  box-shadow:0 12px 30px rgba(0,0,0,0.5);
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  min-height:520px;
+}
+.nav-top { display:flex; align-items:center; gap:10px; }
+.logo { height:44px; width:auto; cursor:pointer; display:block; margin-bottom:6px; }
+.logo-wrap{ display:flex; align-items:center; gap:10px; }
+.title-small{ font-weight:800; font-size:16px; color:var(--muted); }
+.sep { height:1px; background:rgba(255,255,255,0.04); margin:6px 0; border-radius:2px; }
+
+.connect-row{ display:flex; gap:10px; align-items:center; }
+.connect-btn{ padding:10px 12px; border-radius:10px; border:0; background:var(--accent); color:#002; font-weight:700; cursor:pointer; box-shadow:0 8px 20px rgba(0,195,255,0.06); display:flex; align-items:center; gap:8px; }
+
+/* icon-like span */
+.icon { font-size:14px; opacity:0.95; }
+
+/* navigation options */
+.nav-options{ display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+.opt-btn{ background:rgba(255,255,255,0.015); padding:10px 12px; border-radius:10px; cursor:pointer; font-weight:800; display:flex; justify-content:space-between; align-items:center; }
+.opt-btn.active{ background:linear-gradient(90deg, rgba(0,195,255,0.08), rgba(159,223,255,0.02)); box-shadow:0 6px 18px rgba(0,195,255,0.04); color:var(--muted); }
+
+/* bottom small text under logo */
+.logo-note{ font-size:13px; color:#bfefff; margin-top:8px; }
+
+/* RIGHT CONTENT AREA */
+.content {
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+  align-items:stretch;
+}
+
+/* top header inside content - removed main title text per request */
+/* cards */
+.card{ background:var(--card); border-radius:12px; padding:12px; box-shadow:0 12px 30px rgba(0,0,0,0.45); }
+
+.row{ display:flex; gap:12px; align-items:center; }
+
+/* AI Vision layout: video left, detecting+classes right */
+.ai-area{ display:flex; gap:16px; align-items:flex-start; }
+.video-wrap{ flex:1; display:flex; flex-direction:column; gap:12px; }
+.webcam-canvas{ border-radius:12px; width:100%; height:auto; background:#000; display:block; }
+#tmCanvas{ max-width:100%; width:100%; height:auto; border-radius:12px; transform:scaleX(-1); display:block; }
+
+/* sidebar for AI (detecting label + classes) */
+.ai-sidebar{ width:300px; display:flex; flex-direction:column; gap:12px; }
+#mainLabel{ font-size:18px; font-weight:800; text-align:center; padding:12px; border-radius:8px; background:rgba(255,255,255,0.02); min-height:56px; display:flex; align-items:center; justify-content:center; }
+.classes-list{ display:flex; flex-direction:column; gap:8px; max-height:420px; overflow:auto; padding-right:6px; }
+.class-row{ display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-radius:10px; background:rgba(255,255,255,0.015); font-weight:700; }
+
+/* Hand tracking canvas */
+#handsCanvas{ width:100%; height:auto; border-radius:12px; background:#000; display:block; }
+
+/* small text */
+.small{ font-size:13px; color:#bfefff; }
+
+/* responsiveness */
+@media (max-width:980px){
+  .wrapper{ grid-template-columns: 1fr; }
+  .nav{ order:2; }
+  .content{ order:1; }
+  .ai-sidebar{ width:100%; }
+  .ai-area{ flex-direction:column-reverse; }
+}
+  </style>
+
+  <!-- libs -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+</head>
+<body>
+  <div class="wrapper">
+    <!-- LEFT NAV -->
+    <aside class="nav card" role="navigation" aria-label="Left navigation">
+      <div class="logo-wrap">
+        <img src="logo.png" alt="logo" class="logo" />
+        <div>
+          <div class="title-small">AI Vision + Hand Tracking</div>
+        </div>
+      </div>
+
+      <div class="logo-note">Arduino Web App</div>
+
+      <div class="sep" role="presentation"></div>
+
+      <div class="connect-row">
+        <button id="globalConnectBtn" class="connect-btn"><span id="connIcon" class="icon">🔌</span><span id="connText">Connect</span></button>
+      </div>
+
+      <div class="sep" role="presentation"></div>
+
+      <div class="small" style="opacity:0.9">Features</div>
+      <div class="nav-options" role="tablist">
+        <div id="optAIVision" class="opt-btn active" role="tab" tabindex="0" aria-selected="true">AI Vision Arduino</div>
+        <div id="optHandTrack" class="opt-btn" role="tab" tabindex="0" aria-selected="false">Hand Tracking Arduino</div>
+      </div>
+
+      <div style="flex:1"></div>
+    </aside>
+
+    <!-- RIGHT CONTENT -->
+    <main class="content">
+      <!-- AI VISION PANEL -->
+      <section id="aiPanel" class="card" aria-hidden="false">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+          <div style="font-weight:800"> <!-- header intentionally left blank per request --> </div>
+        </div>
+
+        <div style="height:12px"></div>
+
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+          <!-- left column: controls -->
+          <div style="width:300px; display:flex;flex-direction:column;gap:10px;">
+            <div class="card" style="padding:10px;">
+              <div style="font-weight:800;margin-bottom:8px">Model</div>
+              <input id="modelUrl" type="text" placeholder="Paste the Model URL or ID ..." style="width:100%;padding:8px;border-radius:8px;border:0;background:#0b0c0e;color:#fff" />
+              <div style="height:8px"></div>
+              <button id="loadBtn" class="connect-btn" style="width:100%;">Load Model</button>
+              <div style="height:8px"></div>
+              <div id="status" class="small" style="color:var(--muted)"></div>
+            </div>
+
+            <div class="card" style="padding:10px;">
+              <div style="font-weight:800;margin-bottom:8px">Threshold</div>
+              <input id="thresh" type="range" min="30" max="95" value="65" />
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div class="small">Confidence</div>
+                <div id="threshPct" class="small">65%</div>
+              </div>
+            </div>
+
+            <div class="card" style="padding:10px;">
+              <div style="font-weight:800;margin-bottom:8px">Device</div>
+              <div id="deviceName" class="small">—</div>
+            </div>
+          </div>
+
+          <!-- right column: video + sidebar (detecting label + classes) -->
+          <div style="flex:1; display:flex; gap:16px;" class="ai-area">
+            <div class="video-wrap card" style="padding:12px;">
+              <div id="webcam-container" style="display:flex;align-items:center;justify-content:center;">
+                <canvas id="tmCanvas" class="webcam-canvas" style="display:none"></canvas>
+              </div>
+            </div>
+
+            <div class="ai-sidebar">
+              <div class="card" style="padding:12px;">
+                <div id="mainLabel">—</div>
+              </div>
+
+              <div class="card" style="padding:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <div style="font-weight:800">Classes</div>
+                  <div id="classCount" class="small" style="color:var(--muted)">—</div>
+                </div>
+                <div class="classes-list" id="classes"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- HAND TRACKING PANEL -->
+      <section id="handPanel" class="card" aria-hidden="true" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-weight:800"></div>
+        </div>
+
+        <div style="height:12px"></div>
+
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+          <div style="flex:1">
+            <div class="card" style="padding:8px;">
+              <div style="position:relative;">
+                <canvas id="handsCanvas"></canvas>
+                <video id="inputVideo" autoplay playsinline muted style="display:none"></video>
+              </div>
+            </div>
+          </div>
+
+          <aside style="width:300px; display:flex;flex-direction:column;gap:10px;">
+            <div class="card" style="padding:10px;">
+              <div class="small">Detection</div>
+              <div style="height:8px"></div>
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <div style="display:flex;justify-content:space-between;font-weight:800;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02)"><div>Hand</div><div id="handsCount">0</div></div>
+                <div style="display:flex;justify-content:space-between;font-weight:800;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02)"><div>Type</div><div id="handsType">—</div></div>
+                <div style="display:flex;justify-content:space-between;font-weight:800;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02)"><div>Fingers</div><div id="fingersCount">—</div></div>
+              </div>
+            </div>
+
+            <div class="card" style="padding:10px;">
+              <div style="font-weight:800;margin-bottom:8px">Last sent payload</div>
+              <div id="lastPayload" style="font-family:monospace;white-space:pre-wrap">—</div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+<script>
+/* ---------------- Shared Serial (Web Serial API) ---------------- */
+let port = null;
+let writer = null;
+let connected = false;
+const encoder = new TextEncoder();
+let writeQueue = Promise.resolve();
+function queueSerialOperation(op){ writeQueue = writeQueue.then(op, op); return writeQueue; }
+
+async function connectArduino(){
+  if(connected){ await disconnectArduino(); return; }
+  if(!('serial' in navigator)){
+    alert('Web Serial API not supported in this browser');
+    return;
+  }
+  try{
+    port = await navigator.serial.requestPort();
+    if(!port) throw new Error('No port selected');
+    await port.open({ baudRate: 115200 });
+    writer = port.writable.getWriter();
+    connected = true;
+    // change button text/icon
+    document.getElementById('connIcon').textContent = '✅';
+    document.getElementById('connText').textContent = 'Disconnect';
+    setDeviceName('Port open');
+    readLoop().catch(e=>console.warn(e));
+  }catch(err){
+    console.error('Serial connect failed', err);
+    connected = false;
+    document.getElementById('connIcon').textContent = '🔌';
+    document.getElementById('connText').textContent = 'Connect';
+    setDeviceName('');
+  }
+}
+
+async function disconnectArduino(){
+  try{ if(writer){ await writer.close(); writer.releaseLock(); writer = null; } }catch(e){}
+  try{ if(port){ await port.close(); } }catch(e){}
+  port = null; connected = false;
+  document.getElementById('connIcon').textContent = '🔌';
+  document.getElementById('connText').textContent = 'Connect';
+  setDeviceName('');
+}
+
+function setDeviceName(txt){ const d = document.getElementById('deviceName'); if(d) d.textContent = txt || '—'; }
+
+async function readLoop(){
+  if(!port || !port.readable) return;
+  const reader = port.readable.getReader();
+  try{
+    while(true){
+      const { value, done } = await reader.read();
+      if(done) break;
+      if(value){
+        console.log('[Serial Rx]', new TextDecoder().decode(value));
+      }
+    }
+  }catch(e){ console.warn('Serial read error', e); }
+  finally{ reader.releaseLock(); }
+}
+
+function sendSerialLine(line){
+  if(!connected || !writer) { console.warn('Not connected — cannot send', line); return; }
+  return queueSerialOperation(async ()=>{ try{ await writer.write(encoder.encode(line + '\n')); console.log('[Serial Tx]', line); }catch(e){ console.error('Write failed', e); } });
+}
+
+/* wire global connect button */
+document.getElementById('globalConnectBtn').addEventListener('click', connectArduino);
+
+/* ---------------- UI: feature switching ---------------- */
+const optA = document.getElementById('optAIVision');
+const optH = document.getElementById('optHandTrack');
+const aiPanel = document.getElementById('aiPanel');
+const handPanel = document.getElementById('handPanel');
+
+optA.addEventListener('click', ()=>{ activateFeature('ai'); });
+optH.addEventListener('click', ()=>{ activateFeature('hands'); });
+optA.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' ') activateFeature('ai'); });
+optH.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' ') activateFeature('hands'); });
+
+let currentFeature = 'ai'; // default
+function setOptionActive(el, on){
+  if(on) el.classList.add('active'); else el.classList.remove('active');
+}
+
+async function activateFeature(name){
+  if(currentFeature === name) return;
+  // stop current
+  if(currentFeature === 'ai'){ await stopAIVision(); }
+  if(currentFeature === 'hands'){ await stopHands(); }
+
+  // show/hide panels
+  if(name === 'ai'){
+    aiPanel.style.display = ''; aiPanel.setAttribute('aria-hidden','false');
+    handPanel.style.display = 'none'; handPanel.setAttribute('aria-hidden','true');
+    setOptionActive(optA, true); setOptionActive(optH, false);
+    currentFeature = 'ai';
+    startAIVision().catch(e=>console.warn(e));
+  } else {
+    aiPanel.style.display = 'none'; aiPanel.setAttribute('aria-hidden','true');
+    handPanel.style.display = ''; handPanel.setAttribute('aria-hidden','false');
+    setOptionActive(optA, false); setOptionActive(optH, true);
+    currentFeature = 'hands';
+    startHands().catch(e=>console.warn(e));
+  }
+}
+
+/* ---------------- AI Vision (Teachable Machine) ---------------- */
+const tmHelper = window.tmImage;
+let tmModel = null;
+let tmWebcam = null;
+let tmRunning = false;
+const webcamContainer = document.getElementById('webcam-container');
+const loadBtn = document.getElementById('loadBtn');
+const modelUrlInput = document.getElementById('modelUrl');
+const threshRange = document.getElementById('thresh');
+const threshPct = document.getElementById('threshPct');
+const classesEl = document.getElementById('classes');
+const classCountEl = document.getElementById('classCount');
+const mainLabelEl = document.getElementById('mainLabel');
+
+threshRange.addEventListener('input', ()=>{ threshPct.textContent = threshRange.value + '%'; });
+loadBtn.addEventListener('click', loadModel);
+
+function normalizeBase(urlOrId){
+  if(!urlOrId) return null;
+  const s = urlOrId.trim();
+  if(!s) return null;
+  if(s.startsWith('http')){
+    try{
+      const u = new URL(s);
+      const parts = u.pathname.split('/').filter(Boolean);
+      const idx = parts.indexOf('models');
+      if(idx>=0 && parts.length>idx+1) return `https://teachablemachine.withgoogle.com/models/${parts[idx+1]}/`;
+    }catch(e){}
+    if(s.endsWith('model.json')) return s.replace(/model\.json$/,'');
+    return s.endsWith('/') ? s : s + '/';
+  } else {
+    return `https://teachablemachine.withgoogle.com/models/${s}/`;
+  }
+}
+
+async function initWebcamForTM(){
+  if(tmWebcam && typeof tmWebcam.stop === 'function') { tmWebcam.stop(); tmWebcam = null; }
+  const INPUT_SIZE = 224;
+  tmWebcam = new tmHelper.Webcam(INPUT_SIZE, INPUT_SIZE, true);
+  await tmWebcam.setup();
+  await tmWebcam.play();
+  webcamContainer.innerHTML = '';
+  webcamContainer.appendChild(tmWebcam.canvas);
+  tmWebcam.canvas.id = 'tmCanvas';
+  tmWebcam.canvas.style.maxWidth = '100%';
+  tmWebcam.canvas.style.width = '100%';
+  tmWebcam.canvas.style.borderRadius = '12px';
+}
+
+let smoothingBuffer = [];
+let smoothingFrames = 2;
+const STABLE_FRAMES_REQUIRED = 2;
+const COOLDOWN_MS = 700;
+const BLE_SEND_COOLDOWN_MS = 300;
+let candidateIdx = null;
+let stableCount = 0;
+let lastAcceptedIdx = null;
+let lastAcceptedAt = 0;
+let lastSentLabel = null;
+let lastSentAt = 0;
+
+function renderClassesPlaceholder(labels){
+  classesEl.innerHTML = '';
+  labels.forEach((l,i)=>{
+    const row = document.createElement('div');
+    row.className = 'class-row';
+    row.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l}</div><div id="p-${i}" style="min-width:48px;text-align:right;color:var(--muted);font-weight:700">—</div>`;
+    classesEl.appendChild(row);
+  });
+  classCountEl.textContent = labels.length ? labels.length + ' total' : '—';
+}
+function renderProbabilities(arr){
+  arr.forEach((p,i)=>{
+    const el = document.getElementById('p-'+i);
+    if(el) el.textContent = (p*100).toFixed(0) + '%';
+  });
+}
+
+async function loadModel(){
+  const base = normalizeBase(modelUrlInput.value);
+  if(!base){ alert('Provide model URL or id'); return; }
+  try{
+    const modelURL = base + 'model.json';
+    const metadataURL = base + 'metadata.json';
+    tmModel = await tmHelper.load(modelURL, metadataURL);
+    let labels = [];
+    try {
+      if(typeof tmModel.getClassLabels === 'function') labels = tmModel.getClassLabels();
+      else if(Array.isArray(tmModel.labels)) labels = tmModel.labels;
+      else if(tmModel?.metadata?.labels) labels = tmModel.metadata.labels;
+      else if(Array.isArray(tmModel?.model?.labels)) labels = tmModel.model.labels;
+    } catch(e){ console.warn('label read error', e); }
+    if(!labels || labels.length===0) labels = new Array(tmModel.getTotalClasses()).fill(0).map((_,i)=>`Class ${i}`);
+    renderClassesPlaceholder(labels);
+
+    // warmup
+    try{
+      const inShape = tmModel?.model?.inputs?.[0]?.shape;
+      const h = (inShape && inShape.length>=4) ? inShape[1] : 224;
+      const w = (inShape && inShape.length>=4) ? inShape[2] : 224;
+      const warm = tf.zeros([1,h,w,3]);
+      const warmOut = tmModel.model.predict(warm);
+      if(Array.isArray(warmOut)) warmOut.forEach(t=>t.dispose && t.dispose());
+      else warmOut.dispose && warmOut.dispose();
+      warm.dispose();
+    }catch(e){ console.warn('Warmup failed', e); }
+
+    if(!tmWebcam) await initWebcamForTM();
+    if(tmWebcam && tmModel && !tmRunning) predictLoop();
+  }catch(err){
+    console.error('Model load failed', err);
+    tmModel = null;
+    alert('Model load failed — check URL/CORS');
+  }
+}
+
+async function predictLoop(){
+  if(!tmModel || !tmWebcam){ return; }
+  tmRunning = true;
+  smoothingBuffer = [];
+
+  async function step(){
+    if(!tmRunning) return;
+    try{
+      tmWebcam.update();
+      const predictions = await tmModel.predict(tmWebcam.canvas);
+      const probs = predictions.map(p=>p.probability);
+
+      smoothingBuffer.push(probs);
+      if(smoothingBuffer.length > smoothingFrames) smoothingBuffer.shift();
+
+      const avg = new Array(probs.length).fill(0);
+      smoothingBuffer.forEach(arr=>{
+        for(let i=0;i<arr.length;i++) avg[i]+=arr[i];
+      });
+      for(let i=0;i<avg.length;i++) avg[i] = avg[i] / smoothingBuffer.length;
+
+      renderProbabilities(avg);
+
+      const confThreshold = Math.max(0, Math.min(1, (parseInt(threshRange.value)||65)/100));
+      let bestIdx = 0; let bestProb = avg[0]||0;
+      for(let i=1;i<avg.length;i++){ if(avg[i]>bestProb){ bestProb=avg[i]; bestIdx=i; } }
+
+      const now = Date.now();
+      if(lastAcceptedAt && (now - lastAcceptedAt) < COOLDOWN_MS){
+        if(lastAcceptedIdx !== null){
+          const labels = (typeof tmModel.getClassLabels === 'function') ? tmModel.getClassLabels() : null;
+          mainLabelEl.textContent = labels ? labels[lastAcceptedIdx] : ('Class '+lastAcceptedIdx);
+        }
+      } else {
+        if(bestProb >= confThreshold){
+          if(candidateIdx === bestIdx) stableCount++;
+          else { candidateIdx = bestIdx; stableCount = 1; }
+          if(stableCount >= STABLE_FRAMES_REQUIRED){
+            if(lastAcceptedIdx !== candidateIdx){
+              lastAcceptedIdx = candidateIdx;
+              lastAcceptedAt = Date.now();
+              const labels = (typeof tmModel.getClassLabels === 'function') ? tmModel.getClassLabels() : null;
+              const labelText = labels ? labels[lastAcceptedIdx] : ('Class '+lastAcceptedIdx);
+              mainLabelEl.textContent = labelText;
+
+              const nowSend = Date.now();
+              if(labelText && (labelText !== lastSentLabel || (nowSend - lastSentAt) > BLE_SEND_COOLDOWN_MS)){
+                lastSentLabel = labelText;
+                lastSentAt = nowSend;
+                sendSerialLine(labelText);
+              }
+            }
+          }
+        } else {
+          candidateIdx = null;
+          stableCount = 0;
+        }
+      }
+
+    }catch(err){
+      console.error('Prediction loop error', err);
+      tmRunning = false;
+      return;
+    }
+    requestAnimationFrame(step);
+  }
+  step();
+}
+
+async function stopAIVision(){
+  tmRunning = false;
+  try{ if(tmWebcam && typeof tmWebcam.stop === 'function'){ tmWebcam.stop(); tmWebcam = null; } }catch(e){ console.warn(e); }
+  webcamContainer.innerHTML = '<canvas id="tmCanvas" class="webcam-canvas" style="display:none"></canvas>';
+}
+
+/* ---------------- HANDS (MediaPipe) ---------------- */
+const handsCanvas = document.getElementById('handsCanvas');
+const videoEl = document.getElementById('inputVideo');
+let handsCtx = handsCanvas.getContext('2d');
+let handsCamera = null;
+let handsRunning = false;
+
+const handsCountEl = document.getElementById('handsCount');
+const handsTypeEl = document.getElementById('handsType');
+const fingersCountEl = document.getElementById('fingersCount');
+const lastPayloadEl = document.getElementById('lastPayload');
+
+function countFingers(landmarks, handednessLabel){
+  const tips = [4,8,12,16,20];
+  const pips = [2,6,10,14,18];
+  if(!landmarks || landmarks.length===0) return 0;
+  let cnt = 0;
+  for(let i=1;i<5;i++){
+    if(landmarks[tips[i]].y < landmarks[pips[i]].y - 0.01) cnt++;
+  }
+  const tipThumb = landmarks[4], ipThumb = landmarks[3];
+  if(handednessLabel){
+    const label = handednessLabel.toLowerCase();
+    if(label === 'right'){ if(tipThumb.x < ipThumb.x - 0.02) cnt++; }
+    else { if(tipThumb.x > ipThumb.x + 0.02) cnt++; }
+  } else {
+    if(Math.abs(tipThumb.x - ipThumb.x) > 0.04) cnt++;
+  }
+  return cnt;
+}
+
+function drawResultsOnCanvas(results){
+  const w = handsCanvas.width = videoEl.videoWidth || 1280;
+  const h = handsCanvas.height = videoEl.videoHeight || 720;
+  // mirrored draw
+  handsCtx.save();
+  handsCtx.clearRect(0,0,w,h);
+  handsCtx.translate(w,0);
+  handsCtx.scale(-1,1);
+  handsCtx.drawImage(videoEl, 0, 0, w, h);
+  handsCtx.restore();
+
+  if(!results.multiHandLandmarks) return;
+  for(let i=0;i<results.multiHandLandmarks.length;i++){
+    const lm = results.multiHandLandmarks[i];
+    // connectors
+    handsCtx.strokeStyle = '#00ffcc';
+    handsCtx.lineWidth = 2;
+    const connections = [
+      [0,1],[1,2],[2,3],[3,4],
+      [0,5],[5,6],[6,7],[7,8],
+      [0,9],[9,10],[10,11],[11,12],
+      [0,13],[13,14],[14,15],[15,16],
+      [0,17],[17,18],[18,19],[19,20]
+    ];
+    for(const [a,b] of connections){
+      const ax = w * (1 - lm[a].x), ay = h * lm[a].y;
+      const bx = w * (1 - lm[b].x), by = h * lm[b].y;
+      handsCtx.beginPath();
+      handsCtx.moveTo(ax, ay);
+      handsCtx.lineTo(bx, by);
+      handsCtx.stroke();
+    }
+    // dots
+    for(let j=0;j<lm.length;j++){
+      const x = w * (1 - lm[j].x), y = h * lm[j].y;
+      handsCtx.beginPath();
+      handsCtx.fillStyle = '#ffb86b';
+      handsCtx.arc(x, y, 4, 0, Math.PI*2);
+      handsCtx.fill();
+    }
+  }
+}
+
+let lastSentPayload = null;
+
+function buildPayloadCompact(handCount, typeChar, fingerCount){
+  return `${handCount},${typeChar},${fingerCount}`;
+}
+
+function onHandsResults(results){
+  drawResultsOnCanvas(results);
+
+  const handsDetected = (results.multiHandLandmarks || []).length;
+  handsCountEl.textContent = handsDetected;
+
+  let typeChar = 'U';
+  let fingersTotal = 0;
+
+  if(handsDetected === 1){
+    const label = results.multiHandedness && results.multiHandedness[0] ? results.multiHandedness[0].label : null;
+    const labelChar = label ? label.charAt(0).toUpperCase() : 'U';
+    typeChar = (labelChar === 'L' || labelChar === 'R') ? labelChar : 'U';
+    fingersTotal = countFingers(results.multiHandLandmarks[0], label);
+  } else if(handsDetected === 2){
+    typeChar = 'B';
+    for(let i=0;i<2;i++){
+      const label = results.multiHandedness && results.multiHandedness[i] ? results.multiHandedness[i].label : null;
+      fingersTotal += countFingers(results.multiHandLandmarks[i], label);
+    }
+  } else {
+    typeChar = 'N';
+    fingersTotal = 0;
+  }
+
+  handsTypeEl.textContent = typeChar === 'B' ? 'Both' : (typeChar === 'N' ? 'None' : (typeChar === 'U' ? 'Unknown' : (typeChar === 'L' ? 'Left' : 'Right')));
+  fingersCountEl.textContent = fingersTotal;
+
+  const payload = buildPayloadCompact(handsDetected, typeChar, fingersTotal);
+  if(lastSentPayload !== payload){
+    lastSentPayload = payload;
+    lastPayloadEl.textContent = payload;
+    if(connected) sendSerialLine(payload);
+  }
+}
+
+async function startHands(){
+  try{
+    await stopAIVision();
+
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.5
+    });
+    hands.onResults(onHandsResults);
+
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width:1280, height:720 }, audio: false });
+    videoEl.srcObject = stream;
+    await videoEl.play();
+
+    handsCanvas.width = videoEl.videoWidth || 1280;
+    handsCanvas.height = videoEl.videoHeight || 720;
+
+    handsCamera = new Camera(videoEl, {
+      onFrame: async () => { await hands.send({image: videoEl}); },
+      width: videoEl.videoWidth,
+      height: videoEl.videoHeight
+    });
+    await handsCamera.start();
+    handsRunning = true;
+  }catch(e){
+    console.warn('Hand camera start failed', e);
+    handsRunning = false;
+  }
+}
+
+async function stopHands(){
+  try{ if(handsCamera && typeof handsCamera.stop === 'function'){ await handsCamera.stop(); handsCamera = null; } }catch(e){ console.warn(e); }
+  try{ if(videoEl && videoEl.srcObject){ const tracks = videoEl.srcObject.getTracks(); tracks.forEach(t=>t.stop()); videoEl.srcObject = null; } }catch(e){ console.warn(e); }
+  handsRunning = false;
+}
+
+/* ---------------- Initial feature (default AI) ---------------- */
+(function defaultStart(){
+  setOptionActive(optA, true);
+  setOptionActive(optH, false);
+  currentFeature = 'ai';
+})();
+
+/* cleanup on unload */
+window.addEventListener('beforeunload', async ()=>{
+  try{ if(tmWebcam && typeof tmWebcam.stop === 'function') tmWebcam.stop(); }catch(e){}
+  try{ if(writer){ try{ await writer.close(); }catch(e){} writer.releaseLock(); writer = null; } }catch(e){}
+  try{ if(port){ try{ await port.close(); }catch(e){} } }catch(e){}
+  try{ if(handsCamera && typeof handsCamera.stop === 'function') await handsCamera.stop(); }catch(e){}
+});
+</script>
+</body>
+</html>
